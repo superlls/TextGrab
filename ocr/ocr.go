@@ -8,6 +8,7 @@ package ocr
 #import <Vision/Vision.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <AppKit/AppKit.h>
+#import <objc/message.h>
 
 char* performOCR(const char* imagePath) {
     @autoreleasepool {
@@ -33,9 +34,22 @@ char* performOCR(const char* imagePath) {
         // Create text recognition request
         VNRecognizeTextRequest *request = [[VNRecognizeTextRequest alloc] init];
         request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
-        // Only use Simplified Chinese for better accuracy
-        request.recognitionLanguages = @[@"zh-Hans"];
         request.usesLanguageCorrection = YES;
+        if ([request respondsToSelector:@selector(setAutomaticallyDetectsLanguage:)]) {
+            request.automaticallyDetectsLanguage = YES;
+        }
+
+        SEL supportedSel = @selector(supportedRecognitionLanguagesForTextRecognitionLevel:error:);
+        Class reqClass = NSClassFromString(@"VNRecognizeTextRequest");
+        if (reqClass && [reqClass respondsToSelector:supportedSel]) {
+            NSError *langError = nil;
+            NSArray *supported = ((NSArray *(*)(id, SEL, VNRequestTextRecognitionLevel, NSError **))objc_msgSend)(
+                reqClass, supportedSel, VNRequestTextRecognitionLevelAccurate, &langError
+            );
+            if (supported && supported.count > 0) {
+                request.recognitionLanguages = supported;
+            }
+        }
 
         NSError *error = nil;
         [handler performRequests:@[request] error:&error];
@@ -53,7 +67,7 @@ char* performOCR(const char* imagePath) {
 
         for (VNRecognizedTextObservation *observation in observations) {
             VNRecognizedText *topCandidate = [observation topCandidates:1].firstObject;
-            if (topCandidate) {
+            if (topCandidate && topCandidate.confidence >= 0.3f) {
                 [recognizedText appendString:topCandidate.string];
                 [recognizedText appendString:@"\n"];
             }
